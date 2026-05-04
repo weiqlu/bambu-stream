@@ -1,7 +1,9 @@
+mod fields;
+mod sift;
 mod state;
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rumqttc::tokio_rustls::rustls::{
     self, DigitallySignedStruct, SignatureScheme,
@@ -63,6 +65,10 @@ async fn main() -> anyhow::Result<()> {
     let host = std::env::var("PRINTER_HOST")?;
     let serial = std::env::var("PRINTER_SERIAL")?;
     let access_code = std::env::var("PRINTER_ACCESS_CODE")?;
+    let sift_uri =
+        std::env::var("SIFT_EDGE_URI").unwrap_or_else(|_| "grpc://localhost:6666".to_string());
+    let sift_asset =
+        std::env::var("SIFT_EDGE_ASSET").unwrap_or_else(|_| "bambu_printer".to_string());
 
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -93,6 +99,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
 
+    let schema = fields::schema();
+    let mut writer = sift::SiftEdgeWriter::connect(&sift_uri, &sift_asset, &schema).await?;
+    println!("connected to sift edge at {sift_uri} (asset: {sift_asset})");
+
     println!("subscribed to {report_topic}");
 
     let mut snapshot = Value::Object(Default::default());
@@ -103,7 +113,15 @@ async fn main() -> anyhow::Result<()> {
                 match serde_json::from_slice::<Value>(&p.payload) {
                     Ok(delta) => {
                         state::deep_merge(&mut snapshot, delta);
-                        println!("{snapshot}");
+
+                        let print_state = snapshot.get("print").unwrap_or(&Value::Null);
+                        let (ts_ms, ts_ns) = now_ms_ns();
+                        let row = fields::PrinterRow::extract(print_state, ts_ms, ts_ns);
+                        println!("{row:?}");
+                        let batch = fields::to_batch(schema.clone(), &[row])?;
+                        if let Err(e) = writer.push(&batch).await {
+                            eprintln!("sift edge push error: {e}");
+                        }
                     }
                     Err(e) => eprintln!("parse error: {e}"),
                 }
@@ -115,4 +133,14 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+}
+
+fn now_ms_ns() -> (i64, i32) {
+    let total_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let ms = (total_ns / 1_000_000) as i64;
+    let ns = (total_ns % 1_000_000) as i32;
+    (ms, ns)
 }
