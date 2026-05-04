@@ -1,3 +1,5 @@
+mod state;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,6 +9,7 @@ use rumqttc::tokio_rustls::rustls::{
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, TlsConfiguration, Transport};
+use serde_json::Value;
 
 #[derive(Debug)]
 struct AcceptAnyCert;
@@ -92,12 +95,19 @@ async fn main() -> anyhow::Result<()> {
 
     println!("subscribed to {report_topic}");
 
+    let mut snapshot = Value::Object(Default::default());
+
     loop {
         match eventloop.poll().await {
-            Ok(Event::Incoming(Packet::Publish(p))) => match std::str::from_utf8(&p.payload) {
-                Ok(s) => println!("{s}"),
-                Err(_) => println!("<{} bytes of non-utf8>", p.payload.len()),
-            },
+            Ok(Event::Incoming(Packet::Publish(p))) => {
+                match serde_json::from_slice::<Value>(&p.payload) {
+                    Ok(delta) => {
+                        state::deep_merge(&mut snapshot, delta);
+                        println!("{snapshot}");
+                    }
+                    Err(e) => eprintln!("parse error: {e}"),
+                }
+            }
             Ok(_) => {}
             Err(e) => {
                 eprintln!("eventloop error: {e:?}");
