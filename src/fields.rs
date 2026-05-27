@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use arrow::array::{Float64Builder, Int32Builder, Int64Builder, RecordBatch, StringBuilder};
+use arrow::array::{Float64Builder, Int64Builder, RecordBatch, StringBuilder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use serde_json::Value;
 
 #[derive(Debug, Default, Clone)]
 pub struct PrinterRow {
-    pub ts_ms: i64,
-    pub ts_ns: i32,
+    pub ts_ns: i64,
     pub bed_temper: Option<f64>,
     pub bed_target_temper: Option<f64>,
     pub nozzle_temper: Option<f64>,
@@ -39,14 +38,13 @@ pub struct PrinterRow {
 }
 
 impl PrinterRow {
-    pub fn extract(state: &Value, ts_ms: i64, ts_ns: i32) -> Self {
+    pub fn extract(state: &Value, ts_ns: i64) -> Self {
         let ams_first = state
             .get("ams")
             .and_then(|a| a.get("ams"))
             .and_then(|a| a.get(0));
 
         Self {
-            ts_ms,
             ts_ns,
             bed_temper: as_f64(state.get("bed_temper")),
             bed_target_temper: as_f64(state.get("bed_target_temper")),
@@ -82,8 +80,7 @@ impl PrinterRow {
 
 pub fn schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new("ms", DataType::Int64, false),
-        Field::new("ns", DataType::Int32, false),
+        Field::new("timestamp", DataType::Int64, false),
         Field::new("bed_temper", DataType::Float64, true),
         Field::new("bed_target_temper", DataType::Float64, true),
         Field::new("nozzle_temper", DataType::Float64, true),
@@ -118,8 +115,7 @@ pub fn schema() -> SchemaRef {
 pub fn to_batch(schema: SchemaRef, rows: &[PrinterRow]) -> anyhow::Result<RecordBatch> {
     let n = rows.len();
 
-    let mut ms = Int64Builder::with_capacity(n);
-    let mut ns = Int32Builder::with_capacity(n);
+    let mut timestamp = Int64Builder::with_capacity(n);
     let mut bed_temper = Float64Builder::with_capacity(n);
     let mut bed_target_temper = Float64Builder::with_capacity(n);
     let mut nozzle_temper = Float64Builder::with_capacity(n);
@@ -150,8 +146,7 @@ pub fn to_batch(schema: SchemaRef, rows: &[PrinterRow]) -> anyhow::Result<Record
     let mut upload_status = StringBuilder::new();
 
     for r in rows {
-        ms.append_value(r.ts_ms);
-        ns.append_value(r.ts_ns);
+        timestamp.append_value(r.ts_ns);
         bed_temper.append_option(r.bed_temper);
         bed_target_temper.append_option(r.bed_target_temper);
         nozzle_temper.append_option(r.nozzle_temper);
@@ -185,8 +180,7 @@ pub fn to_batch(schema: SchemaRef, rows: &[PrinterRow]) -> anyhow::Result<Record
     Ok(RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(ms.finish()),
-            Arc::new(ns.finish()),
+            Arc::new(timestamp.finish()),
             Arc::new(bed_temper.finish()),
             Arc::new(bed_target_temper.finish()),
             Arc::new(nozzle_temper.finish()),

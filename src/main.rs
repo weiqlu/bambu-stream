@@ -115,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
                         state::deep_merge(&mut snapshot, delta);
 
                         let print_state = snapshot.get("print").unwrap_or(&Value::Null);
-                        let (ts_ms, ts_ns) = now_ms_ns();
-                        let row = fields::PrinterRow::extract(print_state, ts_ms, ts_ns);
+                        let ts_ns = now_ns();
+                        let row = fields::PrinterRow::extract(print_state, ts_ns);
                         println!("{row:?}");
                         let batch = fields::to_batch(schema.clone(), &[row])?;
                         if let Err(e) = writer.push(&batch).await {
@@ -135,12 +135,9 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-fn now_ms_ns() -> (i64, i32) {
-    let total_ns = SystemTime::now()
+fn now_ns() -> i64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let ms = (total_ns / 1_000_000) as i64;
-    let ns = (total_ns % 1_000_000) as i32;
-    (ms, ns)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0)
 }
