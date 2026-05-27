@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     let serial = std::env::var("PRINTER_SERIAL")?;
     let access_code = std::env::var("PRINTER_ACCESS_CODE")?;
     let sift_uri =
-        std::env::var("SIFT_EDGE_URI").unwrap_or_else(|_| "grpc://localhost:6666".to_string());
+        std::env::var("SIFT_EDGE_URI").unwrap_or_else(|_| "grpc://localhost:7438".to_string());
     let sift_asset =
         std::env::var("SIFT_EDGE_ASSET").unwrap_or_else(|_| "bambu_printer".to_string());
 

@@ -11,7 +11,7 @@ Create a `.env` file with:
 - `PRINTER_HOST` — printer's IP (Settings → WLAN)
 - `PRINTER_ACCESS_CODE` — Settings → WLAN → Access Code
 - `PRINTER_SERIAL` — Settings → Device → SN
-- `SIFT_EDGE_URI` — optional, defaults to `grpc://localhost:6666`
+- `SIFT_EDGE_URI` — optional, defaults to `grpc://localhost:7438`
 - `SIFT_EDGE_ASSET` — optional, defaults to `bambu_printer`
 
 ## Run
