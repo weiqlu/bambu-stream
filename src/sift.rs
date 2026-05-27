@@ -1,26 +1,20 @@
 use anyhow::{Context, Result, bail};
 use arrow::array::RecordBatch;
 use arrow::datatypes::Schema;
-use arrow::ipc::writer::{
-    CompressionContext, DictionaryTracker, IpcDataGenerator, IpcWriteOptions,
-};
+use arrow_flight::flight_descriptor::DescriptorType;
 use arrow_flight::flight_service_client::FlightServiceClient;
-use arrow_flight::{FlightData, FlightDescriptor, SchemaAsIpc};
+use arrow_flight::{FlightData, FlightDescriptor, encode::FlightDataEncoderBuilder, error::FlightError};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 
 pub struct SiftEdgeWriter {
-    tx: mpsc::Sender<FlightData>,
-    options: IpcWriteOptions,
-    dictionary_tracker: DictionaryTracker,
-    data_gen: IpcDataGenerator,
-    compression: CompressionContext,
+    batch_tx: mpsc::Sender<Result<RecordBatch, FlightError>>,
 }
 
 impl SiftEdgeWriter {
-    pub async fn connect(uri: &str, asset: &str, schema: &Schema) -> Result<Self> {
+    pub async fn connect(uri: &str, asset: &str, _schema: &Schema) -> Result<Self> {
         let endpoint = normalize_uri(uri)?;
         let channel = Channel::from_shared(endpoint.clone())
             .with_context(|| format!("invalid sift edge uri: {endpoint}"))?
@@ -29,19 +23,38 @@ impl SiftEdgeWriter {
             .with_context(|| format!("failed to connect to sift edge at {endpoint}"))?;
         let mut client = FlightServiceClient::new(channel);
 
-        let (tx, rx) = mpsc::channel::<FlightData>(64);
-        let stream = ReceiverStream::new(rx);
+        let descriptor = FlightDescriptor {
+            r#type: DescriptorType::Path.into(),
+            path: vec![asset.to_string()],
+            ..Default::default()
+        };
 
-        let options = IpcWriteOptions::default();
+        let (batch_tx, batch_rx) = mpsc::channel::<Result<RecordBatch, FlightError>>(8);
+        let (flight_tx, flight_rx) = mpsc::channel::<FlightData>(64);
 
-        let mut schema_data: FlightData = SchemaAsIpc::new(schema, &options).into();
-        schema_data.flight_descriptor = Some(FlightDescriptor::new_path(vec![asset.to_string()]));
-        tx.send(schema_data)
-            .await
-            .map_err(|_| anyhow::anyhow!("schema send failed"))?;
+        let encoded_stream = FlightDataEncoderBuilder::new()
+            .with_flight_descriptor(Some(descriptor))
+            .build(ReceiverStream::new(batch_rx));
 
         tokio::spawn(async move {
-            match client.do_put(stream).await {
+            tokio::pin!(encoded_stream);
+            while let Some(result) = encoded_stream.next().await {
+                match result {
+                    Ok(data) => {
+                        if flight_tx.send(data).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("sift edge encoding error: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            match client.do_put(ReceiverStream::new(flight_rx)).await {
                 Ok(response) => {
                     let mut response = response.into_inner();
                     while let Some(msg) = response.next().await {
@@ -54,31 +67,12 @@ impl SiftEdgeWriter {
             }
         });
 
-        Ok(Self {
-            tx,
-            options,
-            dictionary_tracker: DictionaryTracker::new(false),
-            data_gen: IpcDataGenerator::default(),
-            compression: CompressionContext::default(),
-        })
+        Ok(Self { batch_tx })
     }
 
     pub async fn push(&mut self, batch: &RecordBatch) -> Result<()> {
-        let (encoded_dicts, encoded_batch) = self.data_gen.encode(
-            batch,
-            &mut self.dictionary_tracker,
-            &self.options,
-            &mut self.compression,
-        )?;
-
-        for d in encoded_dicts {
-            self.tx
-                .send(d.into())
-                .await
-                .map_err(|_| anyhow::anyhow!("sift edge channel closed"))?;
-        }
-        self.tx
-            .send(encoded_batch.into())
+        self.batch_tx
+            .send(Ok(batch.clone()))
             .await
             .map_err(|_| anyhow::anyhow!("sift edge channel closed"))?;
         Ok(())

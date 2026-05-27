@@ -80,7 +80,7 @@ impl PrinterRow {
 
 pub fn schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new("timestamp", DataType::Int64, false),
+        Field::new("ns", DataType::Int64, false),
         Field::new("bed_temper", DataType::Float64, true),
         Field::new("bed_target_temper", DataType::Float64, true),
         Field::new("nozzle_temper", DataType::Float64, true),
