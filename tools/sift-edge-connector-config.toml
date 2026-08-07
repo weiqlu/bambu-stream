@@ -1,0 +1,16 @@
+[[connector]]
+name        = "bambu_printer"
+type        = "mqtt_client"
+hostname    = "100.108.120.35"
+port        = 8883
+client_name = "sift-edge"
+username    = changeme
+password    = changeme
+cafile      = /path/to/cafile.pem
+insecure    = true
+
+    [[connector.input]]
+    name       = "all_tlm"
+    identifier = "device/01P00C5C0103124/report"
+    decoder    = {lua = "sift-edge-lua-plugin.lua"}
+    persist    = { asset = "bambu_printer"}
