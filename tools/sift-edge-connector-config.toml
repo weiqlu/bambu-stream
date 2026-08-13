@@ -1,7 +1,7 @@
 [[connector]]
 name        = "bambu_printer"
 type        = "mqtt_client"
-hostname    = "100.108.120.35"
+hostname    = "10.103.1.85"
 port        = 8883
 client_name = "sift-edge"
 username    = changeme
